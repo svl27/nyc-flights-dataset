@@ -1,0 +1,728 @@
+---
+title: "NYCflights Departure Delay Analysis"
+author: 'Siwach Rungnarongruck, Harshini Sri Lalitha Palaparthi, Suraj Vinod Lutade'
+output:
+  html_document:
+    df_print: paged
+    toc: true
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# Introduction:
+
+The goal of this project is to use R and Tableau dashboard to display
+the New York City flight dataset and acquire insights on how to reduce
+departure delay, one of the most addressed issues encountered by all
+stakeholders involved in the aviation supply chain. John F. Kennedy
+International Airport (JFK), Newark Liberty International Airport (EWR),
+and LaGuardia Airport (LGA) in New York City are all incredibly crowded.
+PANYNJ got in touch with us to see whether we could comprehend the issue
+and resolve it. We think that departure delays are affected by the four
+most important elements - weather, flight patterns, carrier and
+manufacturer. In order to quantify, we select several departure delay
+indicators to display, such as average departure delay time (in
+minutes), departure delay occurrences, and departure delay percentage.
+
+To better understand the connection between weather, manufacturing and
+flight patterns and carrier, our business analytics team has posed the
+three questions listed below.
+
+# Q: Is there any carrier or manufacturer that performs significantly better than the rest?
+
+## Carrier Analysis
+
+**Loading the libraries:**
+
+```{r message=FALSE, warning=FALSE, results="hide",fig.show='hide'}
+library(tidyverse)
+library(dplyr)
+library(plotly)
+library(ggplot2)
+library(tidyr)
+library(tidyverse)
+library(corrplot)
+library(xray)
+```
+
+**Reading the files:**
+
+```{r}
+airlines <- read.csv("airlines.csv")
+airports <- read.csv("airports.csv")
+flights <- read.csv("flights.csv")
+planes <- read.csv("planes.csv")
+weather <- read.csv("weather.csv")
+```
+
+**Setting up data frames to use later:**
+
+```{r}
+allflights <- flights %>%
+  select(carrier,hour,origin,dep_delay,time_hour,month)
+
+flights_planes <- left_join(flights,planes,by = "tailnum")
+```
+
+**Which carrier has the most flights?**
+
+```{r}
+allflights %>%
+  group_by(carrier) %>%
+  summarise(count=n()) %>%
+  ggplot(aes(y=count,x=reorder(carrier,-count))) +
+  geom_bar(fill = "blue",color=" gray",stat="identity") + 
+  ylab("Number of Flights") +
+  xlab("Carriers") +
+  ggtitle("Total Number of Flights by Carriers ") + 
+  theme(plot.title = element_text(hjust = 0.5,size=15))
+```
+
+By looking at the graph, we can see that UA has the most number of
+flights.
+
+**Filtering the top ten airlines to get unbiased data:**
+
+If we take the airlines with less sample size i.e. less number of
+flights, the results would be indecisive. Therefore, we will have to
+consider the top ten airlines as they have the significant number of
+flights.
+
+```{r}
+allflights %>%
+  filter(carrier %in% c('UA','EV','B6','DL','AA','MQ','US','9E','WN','VX')) %>%
+  ggplot( aes(y = dep_delay, x = reorder(carrier, dep_delay, na.rm=TRUE, FUN="median"))) +       geom_boxplot() + 
+  ylab("Departure Delay")+ 
+  xlab("Carriers") +
+  ggtitle("Departure Delay by Carriers ") + 
+  theme(plot.title = element_text(hjust = 0.5,size=15))
+```
+
+It is observed that DL, AA and MQ have large number of flights having
+delay greater than 700 min.
+
+**Average Departure Delay:**
+
+```{r}
+allflights %>%
+  filter(carrier %in% c('UA','EV','B6','DL','AA','MQ','US','9E','WN','VX'))%>%
+  filter(dep_delay>0) %>%
+  group_by(carrier) %>%
+  summarise(average_departure_delay= mean(dep_delay,na.rm=TRUE),count=n()) %>%
+  ggplot( aes(y = average_departure_delay, x = reorder(carrier,-count))) +
+  geom_point(size=2,color="blue") +
+  xlab("Carriers") + 
+  ylab("Departure Delay in min") + 
+  ggtitle("Average Departure Delay(in min) by Top Ten Carriers") + 
+  theme(plot.title = element_text(hjust = 0.5,size=15))
+```
+
+The graph shows that despite being the busiest carrier, UA has the
+shortest departure delay.
+
+## Manufacturer Analysis
+
+**Setting up the data frames for manufacturer analysis:**
+
+```{r}
+# All manufacturers
+total_manu <- flights_planes %>%
+  filter(!is.na(manufacturer)) %>% 
+  group_by(manufacturer) %>%
+  summarise(total_count=n(),average_dep_delay = mean(dep_delay, na.rm =TRUE)) %>%
+  arrange(desc(total_count)) 
+
+#Delayed Manufacturers
+delay_manu <- flights_planes %>%
+  filter(dep_delay>0) %>%
+  filter(!is.na(manufacturer)) %>%
+  group_by(manufacturer) %>%
+  summarise(total_delay_count=n(),average_dep_delay = mean(dep_delay, na.rm =TRUE)) %>%
+  arrange(desc(total_delay_count))
+
+#Left Join between Total Manufacturers and Delayed Manufacturers
+summary_manu <- left_join(total_manu,delay_manu, by="manufacturer") %>% 
+  mutate(percent_delay=100*total_delay_count/total_count )
+
+```
+
+```{r}
+total_manu %>%
+  ggplot(aes(x = total_count, y = reorder(manufacturer, total_count), fill=manufacturer )) +
+  geom_bar(width=0.7, stat = "identity", fill="blue",color="gray") +
+  theme_bw(base_line_size = 0, base_size = 7) +
+  xlab("Number of Flights") +
+  ylab("Manufacturers") + 
+  ggtitle("Manufacturers by Total Number of Flights") + 
+  theme(plot.title = element_text(hjust = 0.3,size=15))
+```
+
+As we can see from the graph above, only top five manufacturers have
+significant flights. If we consider all the manufacturers in our
+analysis, results would be inconclusive as the sample size for other
+manufacturers(other than top five) is remarkably less. Therefore, we
+will only consider **top five manufacturers** i.e. Boeing, Embraer,
+Airbus Industrie, Bombardier Inc and Mcdonnell Douglas Aircraft Co.
+
+```{r}
+summary_manu %>%
+  filter(manufacturer %in% c('BOEING','EMBRAER','AIRBUS','AIRBUS INDUSTRIE','BOMBARDIER        INC','CANADAIR')) %>%
+  ggplot(aes(y = percent_delay, x = reorder(manufacturer,total_count), fill=manufacturer))+
+  geom_bar(width=0.7, stat = "identity",fill="blue",colour="gray") +
+  theme_bw(base_line_size = 0, base_size = 7) + 
+  xlab("Manufacturers") + 
+  ylab("Percentage Delay") + 
+  ggtitle("Manufacturers by Percentage Delay") + 
+  theme(plot.title = element_text(hjust = 0.5,size=15))
+  
+```
+
+```{r}
+total_manu %>%
+  filter(manufacturer %in% c('BOEING','EMBRAER','AIRBUS','AIRBUS INDUSTRIE','BOMBARDIER INC'   ,'CANADAIR'))%>%
+  ggplot(aes(y = average_dep_delay,x = reorder(manufacturer,total_count),fill=manufacturer))+
+  geom_bar(width=0.7, stat = "identity",fill="blue",colour="gray") +
+  theme_bw(base_line_size = 0, base_size = 7) +
+  xlab("Manufacturers") + 
+  ylab("Average Departure Delay") + 
+  ggtitle("Manufacturers by Average Departure Delay") + 
+  theme(plot.title = element_text(hjust = 0.5,size=15))
+```
+
+From the above two graphs, we can see that Airbus Industrie has the
+least departure delay.
+
+# Q: Is there any pattern in which delay occurs?
+
+
+**Summarize the data to get to know more about it.**
+
+```{r}
+summary(airlines)
+summary(airports)
+summary(flights)
+summary(planes)
+summary(weather)
+```
+
+
+## To see how many flights are causing delay.
+
+**Clearing the data:**
+
+Remove the cancelled flights and flights that were early. Calculate the
+average departure delay
+
+```{r}
+#remove all **NA** values from flights dataset.
+not_cancelled <- flights %>% 
+  filter(!is.na(arr_delay), !is.na(dep_delay))
+
+not_cancelled
+
+delayed_flights_summary <- not_cancelled %>% 
+  group_by(tailnum) %>%
+  summarize(
+    count = n(),
+    avg_dep_delay = mean(dep_delay)
+  )
+
+delayed_flights_summary
+```
+
+Plotting a **graph** between the number of flights and the average
+departure delay.
+
+```{r}
+ggplot(delayed_flights_summary, aes(avg_dep_delay, count)) + 
+  geom_point() +
+  scale_y_continuous(breaks= seq(0,600,length.out=7))+
+  theme(plot.title = element_text(hjust = 0.5))+
+  geom_vline(xintercept = mean(delayed_flights_summary$avg_dep_delay), color = "red")+
+  labs(title = "Average Delay Vs No. of flights", x = "Avgerage Departure Delays(in minutes)", y = "Number of flights")
+```
+
+It is noticed that Most of the flights have delay below 50 minutes Max
+delay is 300 minutes. Mean of departure delay is around 13 minutes
+
+Sorting the data into different **parts of the day** and removing the
+less useful data.
+
+```{r}
+
+flight_data <- flights %>% drop_na(dep_delay)
+flight_data <- flights %>% drop_na(sched_dep_time)
+
+flight_data<-mutate(flights, timeOfDay = ifelse(sched_dep_time %in% 600:1159, "Morning",
+                                                ifelse(sched_dep_time %in% 1200:1759, "Afternoon",
+                                                       ifelse(sched_dep_time %in% 1800:2359, "Evening","Night"))))
+```
+
+## To notice the delay variation throughout the day
+
+Plotting a **box-plot** to get to know how the delay is in different
+parts of the day.
+
+```{r}
+ggplot(data = flight_data, aes(x = dep_delay, y = c(timeOfDay))) +
+  geom_boxplot(color = "blue")+
+  scale_x_continuous(breaks= seq(0,1300,length.out=14))+
+  labs(y = "Time of a Day", x = "Departure delay", title = "Distribution of Departure Delay during a day")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Evenings seem to have most Departure Delay In all the other times of the
+day, most of the flights have least delay.(Close to zero)
+
+**Splitting** the data into different airports in New York to see if
+there is any pattern.
+
+```{r}
+EWR_data<- flights %>% filter(flights$origin == "EWR"  &  flights$dep_delay>0)
+LGA_data<- flights %>% filter(flights$origin == "LGA"  &  flights$dep_delay>0)
+JFK_data<- flights %>% filter(flights$origin == "JFK"  &  flights$dep_delay>0)
+
+EWR_data<-mutate(EWR_data, Month=month.name[EWR_data$month] )
+LGA_data<-mutate(LGA_data, Month=month.name[LGA_data$month] )
+JFK_data<-mutate(JFK_data, Month=month.name[JFK_data$month] )
+
+flight_data<-mutate(flight_data, Month=month.name[flight_data$month] )
+```
+
+## To notice the departure delay in each month.
+
+A Box-plot per month.
+
+**For all flights:**
+
+```{r}
+ggplot (data = flight_data, mapping = aes(x = factor(Month, levels = month.name), y = dep_delay)) + 
+  geom_boxplot(fill = "orange") +
+  ylim(0,900)+
+  labs(x = "Month", y = "Departure Delays(in minutes)", title = "Delay distribution during each month")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+**At *EWR* Airport**:
+
+```{r}
+ggplot (data = EWR_data, mapping = aes(x = factor(Month, levels = month.name), y = dep_delay)) +
+  geom_boxplot(fill = "orange") +
+  ylim(0,900)+
+  labs(x = "Month", y = "Departure Delays(in minutes)", title = "At EWR - Delay distribution during each month")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+**At *LGA* Airport**:
+
+```{r}
+ggplot (data = LGA_data, mapping = aes(x = factor(Month, levels = month.name), y = dep_delay)) +
+  geom_boxplot(fill = "orange") +
+  ylim(0,900)+
+  labs(x = "Month", y = "Departure Delays(in minutes)", title = "At LGA - Delay distribution during each month")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+**At *JFK* Airport**:
+
+```{r}
+ggplot (data = JFK_data, mapping = aes(x = factor(Month, levels = month.name), y = dep_delay)) +
+  geom_boxplot(fill = "orange") +
+  ylim(0,900)+
+  labs(x = "Month", y = "Departure Delays(in minutes)", title = "At JFK - Delay distribution during each month")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+June and July have the maximum delays in all the airports.
+
+## To check the pattern in which seasons are effecting the delay.
+
+**Dividing the data into seasons:**
+
+```{r}
+flight_data <- flight_data %>%
+  mutate(season = ifelse(month %in% 9:11, "Fall",
+                         ifelse(month %in% 6:8, "Summer",
+                                ifelse(month %in% 3:5, "Spring",
+                                       "Winter"))))
+
+planes_with_delays <- flight_data %>% 
+  filter(dep_delay>0) %>%
+  select(carrier,hour, origin,month, season, dep_delay,time_hour,tailnum, distance,timeOfDay)
+```
+
+**Plotting the seasonal effect on delay**
+
+```{r}
+ggplot(data=planes_with_delays, aes(x=season, y=dep_delay, fill= timeOfDay))+ geom_col()+
+  labs(title = "Delay per season",x=" Season", y="Delay") +
+  scale_fill_brewer(palette="Spectral")+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+
+# Q: How weather affects departure delays ?
+In this part, we try to analyze relationship between weather factors (humidity, visibility, precipitation, and wind speed) and departure delay (average delay and delay percent). 
+
+
+Firstly, we try to see if there is null value in weather dataset
+```{r message=FALSE, warning=FALSE, results="hide",fig.show='hide'}
+anomalies(read_csv('weather.csv'))
+```
+
+df are created as a new dataframe by joining flights and weather dataset and selecting a number of parameters that related to this analysis .For some variables which are wind_dir, temp, humid, and wind_speed, there are little percent of null values (< 5%). Consequently, null values from these columns are exclude. Meanwhile, wind_gust has 79.56% of null values from total data which means that there are not enough data in this column, so we exclude it as well. We also create new column called 'delay' which indicates whether each flight is delay or not delay. If departure delay more than 0, we define it as 1 (delay flight). Otherwise, it is 0 (not delay flight). Inner-join is executed to flights and weather data by time hour and origin to create df.
+
+
+```{r message=FALSE, warning=FALSE, results="hide",fig.show='hide'}
+flights <-read_csv('flights.csv') %>%
+  select(carrier,hour, origin,month, dep_delay,time_hour) %>%
+  mutate(delay = case_when(dep_delay>0 ~ 1,
+                           dep_delay<=0 ~ 0))
+weather <-read_csv('weather.csv') %>%
+  filter(!is.na(temp),!is.na(humid),!is.na(wind_dir),!is.na(wind_speed))%>%
+  select(temp,wind_speed,precip,time_hour,origin,
+                              visib,dewp,humid,wind_dir,pressure)
+
+df <- inner_join(flights,weather,by=c('time_hour','origin'))
+anomalies(df)  
+```
+
+For pressure, null values are replaced by the mean of total pressure.
+
+```{r message=FALSE, warning=FALSE, results="hide",fig.show='hide'}
+df$pressure[is.na(df$pressure)] <- mean(df$pressure,na.rm=TRUE)
+anomalies(df)
+```
+
+After that, correlation matrix are plotted to see if there is any correlation between departure delay and weather factors. As you can see, dewpoint variable is highly correlated with temperature variable (89%). For this reason, dewp is excluded.
+```{r}
+library(ggcorrplot)
+delay_corr_plot <-
+  df%>%
+  filter(delay == 1) %>%
+  select(dep_delay,temp,wind_speed,precip,visib,dewp,humid,wind_dir,pressure)%>%
+  na.omit
+delay_cor <- cor(delay_corr_plot) 
+ggcorrplot(delay_cor, hc.order = TRUE, type = "lower",
+           lab = TRUE, outline.col = "white",
+           ggtheme = ggplot2::theme_gray,
+           colors = c("#6D9EC1", "white", "#E46726"), lab_size=3, tl.cex = 10)
+
+
+
+```
+
+
+Multiple linear regression model is appply to weather data to inspect variable that is not significant when trying to predict departure delay by using a constraint that p-value of each parameter has to be less than 0.05. From the result, wind_dir is exclude as well.
+
+```{R}
+fit <-glm(dep_delay ~., data =delay_corr_plot )
+summary(fit)
+```
+
+Apart from above analysis, we assume that temperature does not affect delay directly so that there will be 5 factors taking into consideration which are humidity, visibility, wind speed, precipitation, and pressure.
+
+
+## Humidity
+
+### Monthly Trend of Humidity 
+First, monthly trend of the factor is plotted to analyze seasonal trend.
+
+
+```{r}
+df%>%
+   group_by( month)%>%
+   summarise(average_humidity = mean(humid))%>%
+   ggplot(aes(x=month, y=average_humidity))+
+    geom_line()+
+    scale_x_continuous(breaks = seq(1,12,by=1))+
+    labs(title = "Monthly Trend of Humidity",
+         y = "Relative Humidity (%)",
+         x = "Month")+
+    theme_bw()+
+    theme(plot.title = element_text(hjust = 0.5))
+```
+
+There are high level of humidity in May to July and it drastically decreased in April and November. However, there is no apparent seasonal trend.
+
+### Delay and Humidity
+
+To analyze the relationship between average departure delay and humidity, scatter plot is generated to observe the trend. X-axis demonstrates relative humidity which is cut into sections of 5. Average delay is based on y-axis while colour of each plot represents number of flights in that level of humidity.
+
+```{r}
+humidity <- df %>%
+  group_by(humid = cut(humid,breaks= seq(0,100, by =10))) %>%
+  summarise(
+    density = n(),
+    average_delay = mean(dep_delay),
+    delay_percent = mean(delay)*100)
+```
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+humidity %>%
+  ggplot(aes(x=humid, y= average_delay)) +geom_point(aes(color=density),size=5) +ylab("Average Delay (min)")+ggtitle("Average delay vs humid with density plot")+
+  scale_color_gradient(low = 'blue',high = 'red')+xlab('Relative Humidity (%)')
+```
+From above graph, an increasing average delay trend can be seen as relative humidity is increasing. Most flights have level of humidity at 35 - 50 percent whereas the delay is approximately 10 minutes.
+
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+humidity %>%
+  ggplot(aes(x=humid, y= delay_percent,fill=density)) +geom_col() +ylab("Delay percent")+ggtitle("Delay percent vs humidity")+
+  scale_fill_gradient(low = 'blue',high = 'red')+xlab('Relative Humidity (%)')
+```
+For delay percent, there is an increasing trend compared to humidity when looking at the bar chart. y-axis represents delay percent while colour of the bar graphs display the number of flights for each relative humidity range.
+
+
+## Visibility
+
+### Monthly trend of visibility
+Monthly trend of visibility is plotted
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+df%>%
+   group_by( month)%>%
+   summarise(average_visibility = mean(visib))%>%
+   ggplot(aes(x=month, y=average_visibility))+
+    geom_line()+
+    scale_x_continuous(breaks = seq(1,12,by=1))+
+    labs(title = "Monthly Trend of Visibility",
+         y = "Visibility (miles)",
+         x = "Month")+
+    theme_bw()+
+    theme(plot.title = element_text(hjust = 0.5))
+```
+There are high visibility for most time of the year except in January, Mar, and December. There is no apparent seasonal trend.
+
+### Delay and Visibility
+
+Two graph is plot which are relationship between visibility and average delay, delay percent. In these two plots. scatter plot is used to analyzed the trend with trend line in order to make it easier to find overall trend. y-axis presents delay percent and average delay while x-axis presents visibility in mile.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+visibility <- df %>%
+  group_by(visib) %>%
+  summarise(
+    density = n(),
+    average_delay = mean(dep_delay),
+    delay_percent = mean(delay)*100)
+
+```
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+visibility %>% ggplot(aes(x=visib, y=delay_percent)) +geom_point()+geom_smooth(method = 'lm')+ggtitle("Average delay vs visibility")+ylab("Average delay") +xlab('Visibility (mile)')
+visibility %>% ggplot(aes(x=visib, y=average_delay)) +geom_point()+geom_smooth()+ggtitle("Delay Percent vs visibility")+ylab("Delay percent")+xlab('Visibility (mile)')
+```
+From the graphs, we can see the decreasing trends in average delay and delay percent compared to visibility which is make sense. If the visibility is low, there should be more delay since it is harder to control the plane. For delay percent, it drastically decrease in 0-2.5 visibility range. It might be the range that visiblity hugely affects the delay.
+
+## Wind Speed
+
+### Monthly trend of wind speed
+
+Monthly trend of wind speed is plotted. Wind speed is highest in March and lowest in August.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+df%>%
+   group_by( month)%>%
+   summarise(average_windspeed = mean(wind_speed))%>%
+   ggplot(aes(x=month, y=average_windspeed))+
+    geom_line()+
+    scale_x_continuous(breaks = seq(1,12,by=1))+
+    labs(title = "Monthly Trend of Wind Speed",
+         y = "Average Speed (mph)",
+         x = "Month")+
+    theme_bw()+
+    theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Delay and Wind speed
+For wind speed, scatter plots are demonstrated which is the same as visibility graphs while y-axis displays the delays and x-axis demonstrates wind speed in mile per hour. However, when compared to visibility, opposite trend is given. Average delay and delay percent tend to increase as the wind speed increases from 0-25 mph. After 25 mph, there are fluctuation of delays which is hard to indicate what trend it is.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+wind_speed <- df %>%
+  group_by(wind_speed) %>%
+  summarise(
+    density = n(),
+    average_delay = mean(dep_delay),
+    delay_percent = mean(delay)*100)
+
+```
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+wind_speed %>% 
+  ggplot(aes(x=wind_speed, y=average_delay)) +geom_point()+geom_smooth(method = 'lm')+ggtitle("Average delay vs Wind Speed (mph)")+ylab("Average Delay (minute)")+xlab('Wind Speed')
+wind_speed %>%
+  ggplot(aes(x=wind_speed, y=delay_percent)) +geom_point()+geom_smooth(method = 'lm')+ggtitle("Delay Percent vs wind Speed (mph)")+ylab("Delay Percent") +xlab('Wind Speed')
+```
+
+Because of the fluctuation of delay, we create a histogram to investigate on number of flights and wind speed.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+df %>% ggplot(aes(x=wind_speed)) +  geom_histogram(color="darkblue", fill="lightblue") + ggtitle("Number of flights vs Wind speed") + ylab("Number of flights")+
+  xlab('Wind Speed')
+
+```
+It can be seen that there are not many flights experiencing wind speed more than 20 mile per hour which is the range of delay fluctuation. This means that we do not have enough information to analyze overall trend that wind speed is more than 20 so it fluctuates. For the visibility, most of the flights have high visilibity, consequently, there are fluctuation of data in low visibility range.
+
+## Precipitation
+
+### Monthly trend of precipitation
+Monthy trend of precipitation is plotted.
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+df%>%
+   group_by(month)%>%
+   summarise(average_precipitation = mean(precip))%>%
+   ggplot(aes(x=month, y=average_precipitation))+
+    geom_line()+
+    scale_x_continuous(breaks = seq(1,12,by=1))+
+    labs(title = "Monthly Trend of Precipitation",
+         y = "Precipitation (inch)",
+         x = "Month")+
+    theme_bw()+
+    theme(plot.title = element_text(hjust = 0.5))
+    
+```
+
+### Delay and Precipitation
+
+From the graph, precipitation is the highest at June which is reasonable since humidity is high in June as well. From the analysis in first part, there are many delays in June. For this reason, precipitation and humidity may affect delay of flights directly.
+
+Focusing on the relationship with precipitation, there are an small increasing trend for average delay and delay percent from precipitation between 0 - 0.5 inch. Beyond that, there are fluctuation in data but the trendlines of both graphs still rise as an upward trend.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+precipitation <- df %>%
+  group_by(precip) %>%
+  summarise(
+    density = n(),
+    average_delay = mean(dep_delay),
+    delay_percent = mean(delay)*100)
+
+```
+
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+precipitation %>% ggplot( aes(x = precip, y = average_delay)) +
+  labs(x = "Precipitation (inch)", y = "Average Delay (min)") +
+  stat_smooth() +
+  geom_point(color = "gray40", alpha = .5) + ggtitle('Average Delay vs Precipitation')
+precipitation %>% ggplot( aes(x = precip, y = delay_percent)) +
+  labs(x = "Precipitation (inch)", y = "Delay Percent") +
+  stat_smooth() +
+  geom_point(color = "gray40", alpha = .5)+ggtitle('Delay Percent vs Precipitation')
+```
+
+## Pressure
+
+We create scatterplot between pressure and delay which has x-axis as pressure and y-axis as average delay and delay percent. The trends are display as same as the trends in percipitation analysis. It is overall upward trend with a fluctuation when pressure in more than 0.5 mbars.
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+pressure <- df %>%
+  group_by(pressure) %>%
+  summarise(
+    density = n(),
+    average_delay = mean(dep_delay),
+    delay_percent = mean(delay)*100)
+
+```
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE, results='hide',out.height='90%',out.width='90%',fig.align='center'}
+precipitation %>% ggplot( aes(x = precip, y = average_delay)) +
+  labs(x = "Pressure (millibars)", y = "Average Delay (min)") +
+  stat_smooth() +
+  geom_point(color = "gray40", alpha = .5) + ggtitle('Average Delay vs Pressure')
+precipitation %>% ggplot( aes(x = precip, y = delay_percent)) +
+  labs(x = "Pressure(millibars)", y = "Delay Percent") +
+  stat_smooth() +
+  geom_point(color = "gray40", alpha = .5)+ ggtitle('Delay Percent vs Pressure')
+```
+
+
+
+# Summary:
+
+1.  Although having a significant number of flights, Carrier UA has the
+    least departure delay and carriers DL, AA and MQ have the more
+    departure delays. Carrier-specific delays happen because of Air
+    Traffic Control issues, Passenger Issues, Crew Issues or maybe
+    maintenance issues such as the mechanic have noticed some unexpected
+    concern which could increase the departure delay time.
+
+2.  Regarding the manufacturer analysis, Airbus Industrie has the least
+    departure delay. This could be due to many factors such as
+    specifications of engine, structure of the plane, etc.
+
+3.  From the above graphs, it is noticed that departure delays in the
+    given data of flight information in 2013 occur more during spring
+    and summer, especially during the months of June and July (Yahoo
+    news,2013). As we know spring and summer seasons are prone to
+    thunderstorms which cause a lot of issues with visibility, wind
+    speed and taking of flights. Also from the report given by the US
+    Department of transportation, We know that 7.39% of the delay was
+    caused by aviation system delay in June whereas it was 6.16% in
+    July.10.43% of the delay was caused by the late arrival of aircraft
+    in June, while it was 9.01% in July. Some of the delays were caused
+    by maintenance and crew problems, 7.06% from June and 6.59% from
+    July. Out of all the late flights,41.80% of June are caused by
+    extreme weather or National aviation system delay and 37.91% of July
+    (US Department of transportation, 2014).
+
+4.  Also, In the time of the day graph, we notice that evenings have the
+    most delay when compared to the rest of the day. Delay in the
+    evenings is usually caused by a few factors. Which are Air traffic,
+    Air traffic control, maintenance, baggage loading and also fuel
+    refilling. In the evening, it is said that a lot of the delay is
+    also caused due to the shift change of employees. And also, the
+    Delay of one flight has led to delays in the next flights
+    (Forbes,2019).
+
+5.  From weather analysis, there are apparent effects to departure delay by weather factors. As for humidity, wind speed, precipitation, and pressure, they tend to       make more departure delays if their value increase. In the other hand, high visibility tend to lessen flight delay. Especially for precipitation and humidity, as     they have their highest value and in June, and flight delay are increasing during that month as well. So these two factors could affect departure delay directly.
+
+6.  We are aware that delays brought on by bad or extreme weather are
+    inevitable. However, the other elements, such as air traffic,
+    maintenance, luggage loading, fuel replenishment, and delays brought
+    on by staff members changing shifts, are reducible. Airlines can
+    enhance the system to keep flights and luggage loading running
+    smoothly, as well as properly changing personnel shifts so that the
+    flights and airport are not disrupted. To pinpoint accurately which
+    element is causing the delay, we need further information.
+
+# Contribution:
+
+## Tableau Dashboard:
+We split the workings of dashboard 
+
+* Siwach : Departure airport, Day, Month, Weather, Number of flights and delays
+
+* Suraj: Carrier graph and information about the graphs.
+
+* Harshini: Average delay of each destination
+
+## R markdown:
+We split our EDA equally into three questions.
+
+* Siwach: Answer for the question 'How weather affects departure delay?'
+
+* Suraj: Answer for the question 'Is there any carrier or manufacturer that performs significantly better than the rest?'
+
+* Harshini: Answer for the question 'Is there any pattern in which delay occurs?'
+
+
+
+# Reference:
+
+1.Forbes, 2019. *Most Flight Delays? In The Evening And Unrelated To Bad
+Weather* [Online]. Available from:
+<https://www.forbes.com/sites/garystoller/2019/06/03/most-flight-delays-in-the-evening-and-unrelated-to-bad-weather/>
+[Accessed on 06 December 2022].
+
+2.US Department of transportation,2014. *July Airline On-Time
+Performance Up, Cancellations Down From Previous Year, June* [Online].
+Available from:
+<https://www.transportation.gov/briefing-room/july-airline-time-performance-cancellations-down-previous-year-june>
+[Accessed on 06 December 2022].
+
+3.Yahoo news,2013. *Flight delays pile up amid FAA budget cuts*
+[Online].Available from:
+<https://news.yahoo.com/flight-delays-pile-amid-faa-budget-cuts-222819836--finance.html?guccounter=1&guce_referrer=aHR0cHM6Ly93d3cuZ29vZ2xlLmNvbS8&guce_referrer_sig=AQAAAI5gJw7TsvbMWk7GfF2UTv8tzkyZODYE0JiPPIDeu78B_R3IrEcQ_pYl9C77FVIP3t9ufAVm779rQKzwBcXjRGMryD3h7qTUzvxdGtDyNUBBRWewBpM_Q1ZDh2hCmlUZ1l18AywWXxqThFYKAvq9Zi_oF2l-GDVFr1rH4S1Kuuza>
+[Accessed on 06 December 2022].
